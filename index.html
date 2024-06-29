@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>ChatGPT & TTS</title>
+		<style>
+			#app {
+				margin: 0 auto;
+				max-width: 550px;
+			}
+			#chat-controls, #api-key-input {
+				margin-top: 20px;
+			}
+			#chat-input, #api-key, #assistant-id {
+				width: 100%;
+				height: 30px;
+				margin-bottom: 10px;
+			}
+			#chat-button, #save-keys {
+				margin-top: 10px;
+			}
+			#chat-response {
+				margin-top: 20px;
+				min-height: 100px;
+				width: 100%;
+			}
+		</style>
+	</head>
+	<body>
+		<div id="app">
+			<div id="api-key-input">
+				<input type="password" id="api-key" placeholder="Enter your OpenAI API Key" />
+				<input type="text" id="assistant-id" placeholder="Enter your Assistant ID" />
+				<button id="save-keys">Save Keys</button>
+			</div>
+			<div id="chat-controls" style="display: none;">
+				<textarea id="chat-input" placeholder="Enter your message"></textarea>
+				<button id="chat-button">Send</button>
+				<textarea id="chat-response" readonly></textarea>
+				<audio id="tts-audio" controls style="display: none"></audio>
+			</div>
+		</div>
+
+		<script type="module">
+			import OpenAI from "https://cdn.skypack.dev/openai";
+
+			let openai, assistantId;
+
+			const elements = ['api-key', 'assistant-id', 'save-keys', 'chat-input', 'chat-button', 'chat-response', 'tts-audio', 'chat-controls', 'api-key-input']
+				.reduce((acc, id) => ({...acc, [id.replace(/-./g, m => m[1].toUpperCase())]: document.getElementById(id)}), {});
+
+			elements.saveKeys.addEventListener("click", saveKeys);
+			elements.chatButton.addEventListener("click", processChat);
+			elements.chatInput.addEventListener("keydown", e => {
+				if (e.key === "Enter" && !e.shiftKey) {
+					processChat();
+					e.preventDefault();
+				}
+			});
+
+			function saveKeys() {
+				const apiKey = elements.apiKey.value.trim();
+				assistantId = elements.assistantId.value.trim();
+				if (apiKey && assistantId) {
+					openai = new OpenAI({ apiKey, dangerouslyAllowBrowser: true });
+					elements.apiKeyInput.style.display = "none";
+					elements.chatControls.style.display = "block";
+				} else {
+					alert("Please enter both API Key and Assistant ID");
+				}
+			}
+
+			async function processChat() {
+				try {
+					const userInput = elements.chatInput.value.trim();
+					if (!userInput) return;
+					elements.chatInput.value = "";
+					elements.chatResponse.value = "Processing...";
+
+					const thread = await openai.beta.threads.create();
+
+					await openai.beta.threads.messages.create(thread.id, {
+						role: "user",
+						content: userInput
+					});
+
+					const run = await openai.beta.threads.runs.create(thread.id, {
+						assistant_id: assistantId
+					});
+
+					while (42) {
+						await new Promise(resolve => setTimeout(resolve, 1000));
+						const runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+						if (runStatus.status === "completed") break;
+					}
+
+					const messages = await openai.beta.threads.messages.list(thread.id);
+					const assistantReply = messages.data[0].content[0].text.value;
+
+					elements.chatResponse.value = assistantReply;
+
+					// Text-to-speech functionality
+					try {
+						const speechResponse = await openai.audio.speech.create({
+							model: "tts-1",
+							voice: "alloy",
+							input: assistantReply
+						});
+
+						const audioBlob = await speechResponse.blob();
+						const audioUrl = URL.createObjectURL(audioBlob);
+						elements.ttsAudio.src = audioUrl;
+						elements.ttsAudio.style.display = "block";
+						elements.ttsAudio.play();
+					} catch (ttsError) {
+						console.error("Error generating speech:", ttsError);
+					}
+				} catch (error) {
+					console.error("Error processing chat:", error);
+					elements.chatResponse.value = "An error occurred. Please try again.";
+				}
+			}
+		</script>
+	</body>
+</html>
